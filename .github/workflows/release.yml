@@ -23,10 +23,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+          components: rustfmt, clippy
+
       - name: Show toolchain
         run: |
+          rustup show active-toolchain
           rustc --version
           cargo --version
+          cargo clippy --version
+          cargo fmt --version
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
