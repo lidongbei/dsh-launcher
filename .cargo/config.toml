@@ -1,0 +1,3 @@
+# Ship a self-contained exe: no VCRUNTIME140.dll on the target machine.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH Launcher · 配置</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --ink: #1b2333;
+    --muted: #6b7688;
+    --line: #e4e8f0;
+    --brand: #4e6cff;
+    --brand-soft: #eef1ff;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .logo {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: var(--brand); position: relative; flex: none;
+  }
+  .logo::after {
+    content: ""; position: absolute; inset: 11px 9px 13px 9px;
+    background: #fff; border-radius: 50% 44% 46% 40%;
+  }
+  h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+  .pill {
+    margin-left: auto; padding: 7px 14px; border-radius: 999px;
+    font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 8px;
+    background: #eceff4; color: var(--muted);
+  }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.running { background: #e8f7ee; color: var(--ok); }
+  .pill.stopped { background: #fdeceb; color: var(--bad); }
+  .pill.working { background: #fdf3e3; color: var(--warn); }
+  .grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 18px 20px; box-shadow: 0 1px 2px rgba(24, 34, 58, .04);
+  }
+  .card h2 { font-size: 13px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .6px; }
+  .big { font-size: 26px; font-weight: 650; letter-spacing: .3px; }
+  .big small { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 8px; }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; margin-top: 14px; font-size: 13px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .kv a { color: var(--brand); text-decoration: none; word-break: break-all; }
+  .kv code { background: var(--brand-soft); padding: 1px 6px; border-radius: 6px; font-size: 12.5px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  button {
+    font: inherit; border-radius: 10px; padding: 9px 16px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    transition: background .15s, border-color .15s, transform .05s;
+  }
+  button:hover:not(:disabled) { border-color: #c9d2e3; background: #fafbff; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #4a63f0; border-color: #4a63f0; }
+  button.danger { color: var(--bad); border-color: #f3cfcd; }
+  button.danger:hover:not(:disabled) { background: #fdf4f3; }
+  button.ghost { border-color: transparent; color: var(--muted); }
+  button.ghost:hover:not(:disabled) { background: #f1f3f9; }
+  form .row { display: grid; grid-template-columns: 116px 1fr; align-items: center; gap: 10px; margin-bottom: 9px; }
+  form label { color: var(--muted); font-size: 13px; }
+  input[type="text"], input[type="number"], textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+    font: inherit; color: var(--ink); background: #fcfdff;
+  }
+  input:focus, textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+  input::placeholder, textarea::placeholder { color: #a8b1c2; }
+  textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+    font: 12.5px/1.55 "Cascadia Mono", Consolas, monospace; color: var(--ink);
+    background: #fcfdff; resize: vertical; min-height: 34px;
+  }
+  form .row.tall { align-items: start; }
+  form .row.tall label { padding-top: 8px; }
+  .cmd {
+    display: block; background: #101728; color: #d7e0f2; padding: 9px 11px; border-radius: 9px;
+    font: 12px/1.5 "Cascadia Mono", Consolas, monospace; word-break: break-all;
+  }
+  .hint { color: #98a2b3; font-size: 12px; margin: -4px 0 10px 126px; }
+  .switch { display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 13px; }
+  .switch input { width: 16px; height: 16px; accent-color: var(--brand); }
+  .note { color: #98a2b3; font-size: 12.5px; }
+  .form-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px;
+    padding-top: 14px; border-top: 1px dashed var(--line); }
+  .form-foot .state { color: var(--muted); font-size: 12.5px; }
+  .sep { grid-column: 1 / -1; height: 1px; background: var(--line); margin: 6px 0 12px; }
+  .logs { margin-top: 18px; }
+  .logs .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .logs .tabs button { padding: 6px 12px; font-size: 12.5px; }
+  .logs .tabs button.on { background: var(--brand-soft); border-color: #d7ddff; color: var(--brand); }
+  pre {
+    margin: 0; max-height: 260px; overflow: auto; background: #101728; color: #d7e0f2;
+    border-radius: 11px; padding: 14px 16px; font: 12.5px/1.55 "Cascadia Mono", Consolas, monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px);
+    background: #101728; color: #fff; padding: 10px 18px; border-radius: 10px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: all .22s;
+    box-shadow: 0 8px 24px rgba(16, 23, 40, .22); max-width: 80vw;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.bad { background: #7f1d1d; }
+  .toast.ok { background: #14532d; }
+  footer { margin-top: 26px; color: #98a2b3; font-size: 12px; text-align: center; }
+  code.path { font-size: 12px; color: var(--muted); word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"></div>
+    <div>
+      <h1>DSH Launcher</h1>
+      <p>dsh web 的托盘启动器 · 配置页</p>
+    </div>
+    <div class="pill" id="pill"><span class="dot"></span><span id="pill-text">连接中…</span></div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <h2>服务状态</h2>
+      <div class="big" id="state-title">—<small id="state-sub"></small></div>
+      <div class="kv">
+        <div>地址</div><div id="addr">—</div>
+        <div>监听 PID</div><div id="pids">—</div>
+        <div>配置页</div><div><a href="#" id="admin-url" target="_blank" rel="noreferrer">—</a></div>
+        <div>日志目录</div><div><code class="path" id="log-dir">—</code></div>
+      </div>
+      <div class="actions">
+        <button class="primary" id="btn-start">启动</button>
+        <button id="btn-restart">重启</button>
+        <button class="danger" id="btn-stop">停止</button>
+        <button id="btn-open">打开 Web UI</button>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button class="ghost" id="btn-quit">退出托盘<span style="color:#98a2b3">（保留服务）</span></button>
+        <button class="ghost danger" id="btn-quit-stop">停止服务并退出</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>启动参数</h2>
+      <form id="form">
+        <div class="row"><label>服务端口</label><input type="number" name="port" min="1" max="65535" required></div>
+        <div class="row"><label>监听地址</label><input type="text" name="host" required></div>
+        <div class="row"><label>node.exe</label><input type="text" name="nodeExe" placeholder="留空自动查找"></div>
+        <div class="row"><label>bin.js</label><input type="text" name="entryScript" placeholder="留空自动查找"></div>
+        <div class="row"><label>日志目录</label><input type="text" name="logDirectory" placeholder="留空使用 %USERPROFILE%\.dsh\logs"></div>
+        <div class="row"><label>堆内存上限</label><input type="number" name="heapMb" min="0" max="32768" step="256" list="heap-presets" placeholder="0 = 不设置，用 Node 默认"><datalist id="heap-presets"><option value="0">默认（不设置）</option><option value="2048">2 GB</option><option value="4096">4 GB（推荐）</option><option value="8192">8 GB</option><option value="16384">16 GB</option></datalist></div>
+        <div class="row"><label>启动超时</label><input type="number" name="readyTimeout" step="1" min="10" max="900"></div>
+        <div class="row"><label>停止超时</label><input type="number" name="stopTimeout" step="1" min="5" max="300"></div>
+        <div class="sep"></div>
+        <div class="row"><label>dsh profile</label><input type="text" name="profile" placeholder="web" required></div>
+        <div class="row tall"><label>--patch</label><textarea name="patches" rows="2" placeholder="每行一个 overlay 路径，按顺序叠加在 profile 之上"></textarea></div>
+        <div class="row"><label>--public-url</label><input type="text" name="publicUrl" placeholder="留空不设置，例如 https://app.example/ui/"></div>
+        <div class="row tall"><label>--trusted-host</label><textarea name="trustedHosts" rows="2" placeholder="每行一个授权域：host 或 host:port"></textarea></div>
+        <div class="row"><label>--tls-cert</label><input type="text" name="tlsCert" placeholder="PEM 证书链；留空走 HTTP"></div>
+        <div class="row"><label>--tls-key</label><input type="text" name="tlsKey" placeholder="PEM 私钥；证书和私钥要成对"></div>
+        <div class="row tall"><label>其他参数</label><textarea name="extraArgs" rows="3" placeholder="每行一个，原样附在命令末尾"></textarea></div>
+        <div class="row tall"><label>启动命令</label><code class="cmd" id="command">—</code></div>
+        <div class="sep"></div>
+        <div class="row"><label>配置页端口</label><input type="number" name="adminPort" step="1" min="1" max="65535"></div>
+        <div class="sep"></div>
+        <div class="row"><label>自动启动</label>
+          <div class="switch"><input type="checkbox" name="autostart"><span>托盘启动后自动拉起服务</span></div>
+        </div>
+        <div class="row"><label>配置页</label>
+          <span class="note">开关在托盘菜单「启用配置页」里，关掉后监听退出、端口直接释放</span>
+        </div>
+        <div class="form-foot">
+          <button class="primary" type="submit" id="btn-save">保存配置</button>
+          <button type="button" class="ghost" id="btn-reset">还原</button>
+          <span class="state" id="form-state">已同步</span>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <section class="card logs">
+    <h2>日志</h2>
+    <div class="tabs">
+      <button id="tab-tray" class="on">托盘日志</button>
+      <button id="tab-service">服务日志</button>
+      <button class="ghost" id="btn-logs-refresh" style="margin-left:auto">刷新</button>
+    </div>
+    <pre id="log-box">加载中…</pre>
+  </section>
+
+  <footer>设置保存在 <code class="path" id="settings-file">%LOCALAPPDATA%\DshLauncher\settings.json</code></footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const form = $('form');
+  const fields = ['port', 'host', 'nodeExe', 'entryScript', 'logDirectory', 'heapMb',
+    'readyTimeout', 'stopTimeout', 'profile', 'patches', 'publicUrl', 'trustedHosts',
+    'tlsCert', 'tlsKey', 'extraArgs', 'adminPort', 'autostart'];
+  const listFields = ['patches', 'trustedHosts', 'extraArgs'];
+  const lines = (text) => String(text || '').split(/[\r\n]+/).map((v) => v.trim()).filter(Boolean);
+  const splitList = (value) => (Array.isArray(value) ? value.join('\n') : String(value || ''));
+  let snapshot = null;
+  let logName = 'tray';
+  let dirty = false;
+  let lastMessage = '';
+
+  const toast = (text, kind) => {
+    const box = $('toast');
+    box.textContent = text;
+    box.className = 'toast show' + (kind ? ' ' + kind : '');
+    clearTimeout(box._timer);
+    box._timer = setTimeout(() => { box.className = 'toast'; }, 3200);
+  };
+
+  async function api(path, options = {}) {
+    const headers = { 'X-Dsh-Launcher': '1' };
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    const response = await fetch(path, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (_) { data = { raw: text }; }
+    if (!response.ok) {
+      throw new Error((data && data.error) || ('HTTP ' + response.status));
+    }
+    return data;
+  }
+
+  function fill(settings) {
+    for (const key of fields) {
+      const input = form.elements[key];
+      if (!input) continue;
+      if (input.type === 'checkbox') input.checked = Boolean(settings[key]);
+      else if (listFields.includes(key)) input.value = splitList(settings[key]);
+      else input.value = settings[key] ?? '';
+    }
+    snapshot = JSON.parse(JSON.stringify(settings));
+    dirty = false;
+    setFormState('已同步', '');
+  }
+
+  function collect() {
+    const out = {};
+    for (const key of fields) {
+      const input = form.elements[key];
+      if (!input) continue;
+      if (input.type === 'checkbox') out[key] = input.checked;
+      else if (input.type === 'number') out[key] = Number(input.value);
+      else if (listFields.includes(key)) out[key] = lines(input.value);
+      else out[key] = input.value;
+    }
+    return out;
+  }
+
+  function setFormState(text, color) {
+    const box = $('form-state');
+    box.textContent = text;
+    box.style.color = color || '';
+  }
+
+  function render(state) {
+    const running = state.running;
+    const busy = state.busy;
+    const pill = $('pill');
+    pill.className = 'pill ' + (busy ? 'working' : (running ? 'running' : 'stopped'));
+    $('pill-text').textContent = busy ? '操作中…' : (running ? '运行中' : '已停止');
+    $('state-title').firstChild.textContent = busy ? '正在处理' : (running ? '服务运行中' : '服务已停止');
+    $('state-sub').textContent = busy ? '请稍候，操作完成后会自动刷新' : '';
+    $('addr').innerHTML = running
+      ? `<code>http://${state.settings.host}:${state.settings.port}/</code>`
+      : `<code>http://${state.settings.host}:${state.settings.port}/</code> <span style="color:#98a2b3">（未监听）</span>`;
+    $('pids').textContent = state.pids && state.pids.length ? state.pids.join(', ') : '—';
+    const adminLink = $('admin-url');
+    adminLink.textContent = state.adminUrl;
+    adminLink.href = state.adminUrl;
+    $('log-dir').textContent = state.logDir;
+    $('command').textContent = state.command || '—';
+    $('settings-file').textContent = state.settingsFile;
+    $('btn-start').disabled = busy || running;
+    $('btn-restart').disabled = busy || !running;
+    $('btn-stop').disabled = busy || !running;
+    $('btn-open').disabled = !running;
+    $('btn-quit').disabled = busy;
+    $('btn-quit-stop').disabled = busy;
+
+    if (!dirty) fill(state.settings);
+
+    if (state.last && state.last.message && state.last.message !== lastMessage) {
+      lastMessage = state.last.message;
+      toast(state.last.message, state.last.ok ? 'ok' : 'bad');
+    }
+  }
+
+  async function refresh() {
+    try {
+      const state = await api('/api/state');
+      render(state);
+    } catch (error) {
+      $('pill').className = 'pill stopped';
+      $('pill-text').textContent = '托盘未响应';
+      $('state-title').firstChild.textContent = '无法连接托盘';
+      $('state-sub').textContent = error.message;
+    }
+  }
+
+  async function act(action) {
+    try {
+      await api('/api/action', { method: 'POST', body: { action } });
+      toast('已提交：' + action, 'ok');
+      setTimeout(refresh, 400);
+    } catch (error) {
+      toast(error.message, 'bad');
+    }
+  }
+
+  async function quit(stopService) {
+    const asked = stopService
+      ? '停止服务并退出托盘？'
+      : '退出托盘？服务会继续运行。';
+    if (!confirm(asked)) return;
+    try {
+      await api('/api/quit', { method: 'POST', body: { stopService } });
+      toast(stopService ? '正在停止服务并退出…' : '托盘正在退出…', 'ok');
+      setTimeout(() => {
+        $('pill').className = 'pill stopped';
+        $('pill-text').textContent = '托盘已退出';
+      }, 1200);
+    } catch (error) {
+      toast(error.message, 'bad');
+    }
+  }
+
+  async function loadLog() {
+    const box = $('log-box');
+    box.textContent = '加载中…';
+    try {
+      const response = await fetch(`/api/log?name=${logName}&lines=200`, { headers: { 'X-Dsh-Launcher': '1' } });
+      const text = await response.text();
+      box.textContent = text || '（空）';
+      box.scrollTop = box.scrollHeight;
+    } catch (error) {
+      box.textContent = '读取日志失败：' + error.message;
+    }
+  }
+
+  form.addEventListener('input', () => {
+    dirty = true;
+    setFormState('有未保存的修改', '#d97706');
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const result = await api('/api/settings', { method: 'POST', body: collect() });
+      dirty = false;
+      render(result);
+      setFormState('已保存', '#16a34a');
+      toast('配置已保存', 'ok');
+      if (result.restartRequired) {
+        toast('配置页端口变了，重启托盘后生效', 'bad');
+      }
+    } catch (error) {
+      setFormState('保存失败', '#dc2626');
+      toast(error.message, 'bad');
+    }
+  });
+
+  $('btn-reset').addEventListener('click', () => {
+    if (snapshot) fill(snapshot);
+  });
+  $('btn-start').addEventListener('click', () => act('start'));
+  $('btn-restart').addEventListener('click', () => act('restart'));
+  $('btn-stop').addEventListener('click', () => act('stop'));
+  $('btn-open').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/open', { method: 'POST', body: {} });
+      toast('已打开 ' + result.url, result.opened ? 'ok' : 'bad');
+    } catch (error) {
+      toast(error.message, 'bad');
+    }
+  });
+  $('btn-quit').addEventListener('click', () => quit(false));
+  $('btn-quit-stop').addEventListener('click', () => quit(true));
+
+  const tabs = { 'tab-tray': 'tray', 'tab-service': 'service' };
+  for (const [id, name] of Object.entries(tabs)) {
+    $(id).addEventListener('click', () => {
+      logName = name;
+      for (const other of Object.keys(tabs)) $(other).classList.toggle('on', other === id);
+      loadLog();
+    });
+  }
+  $('btn-logs-refresh').addEventListener('click', loadLog);
+
+  refresh();
+  loadLog();
+  setInterval(refresh, 2000);
+  setInterval(() => { if (!document.hidden) loadLog(); }, 6000);
+})();
+</script>
+</body>
+</html>
