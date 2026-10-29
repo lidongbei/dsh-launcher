@@ -2,21 +2,21 @@
 //! worker threads so a slow start never freezes the menu.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicIsize, Ordering};
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIIF_WARNING, NIM_ADD,
-    NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::PCWSTR;
 
+use crate::admin;
 use crate::app;
 use crate::diag;
-use crate::admin;
 use crate::icon::{self, State};
 use crate::service;
 
@@ -227,7 +227,12 @@ fn with_tray_mut(f: impl FnOnce(&mut Tray)) {
 
 fn tooltip(state: State) -> String {
     let config = app::config();
-    format!("DSH Web · {}:{} · {}", config.host, config.port, state.label())
+    format!(
+        "DSH Web · {}:{} · {}",
+        config.host,
+        config.port,
+        state.label()
+    )
 }
 
 impl Tray {
@@ -310,7 +315,11 @@ fn update_menu_state() {
         enable(menu, ID_STOP, running && !busy);
         enable(menu, ID_OPEN, true);
         enable(menu, ID_OPEN_ADMIN, app::admin_on());
-        let ticked = if app::admin_enabled() { MF_CHECKED } else { MF_UNCHECKED };
+        let ticked = if app::admin_enabled() {
+            MF_CHECKED
+        } else {
+            MF_UNCHECKED
+        };
         let _ = CheckMenuItem(menu, ID_ADMIN as u32, (MF_BYCOMMAND | ticked).0);
         enable(menu, ID_LOGS, true);
     }
@@ -318,12 +327,12 @@ fn update_menu_state() {
 
 unsafe fn enable(menu: HMENU, id: usize, enabled: bool) {
     unsafe {
-    let flags = if enabled {
-        MF_BYCOMMAND | MF_ENABLED
-    } else {
-        MF_BYCOMMAND | MF_GRAYED
-    };
-    let _ = EnableMenuItem(menu, id as u32, flags);
+        let flags = if enabled {
+            MF_BYCOMMAND | MF_ENABLED
+        } else {
+            MF_BYCOMMAND | MF_GRAYED
+        };
+        let _ = EnableMenuItem(menu, id as u32, flags);
     }
 }
 
@@ -465,7 +474,11 @@ fn refresh_state(hwnd: HWND) {
     let config = app::config();
     let previous = with_tray(|tray| tray.state, State::Unknown);
     let running = service::is_running(config.port);
-    let state = if running { State::Running } else { State::Stopped };
+    let state = if running {
+        State::Running
+    } else {
+        State::Stopped
+    };
     if state == previous {
         return;
     }
@@ -502,7 +515,12 @@ fn toggle_admin(hwnd: HWND) {
     });
     if turning_on && !app::admin_on() {
         match admin::start(settings.admin_port) {
-            Ok(port) => balloon(hwnd, "配置页已开启", &format!("http://127.0.0.1:{port}/"), false),
+            Ok(port) => balloon(
+                hwnd,
+                "配置页已开启",
+                &format!("http://127.0.0.1:{port}/"),
+                false,
+            ),
             Err(error) => balloon(hwnd, "配置页启动失败", &error, true),
         }
     } else if turning_on {
@@ -523,7 +541,12 @@ fn toggle_admin(hwnd: HWND) {
 
 fn open_admin(hwnd: HWND) {
     if !app::admin_on() {
-        balloon(hwnd, "配置页未启用", "托盘菜单里勾选「启用配置页」即可", true);
+        balloon(
+            hwnd,
+            "配置页未启用",
+            "托盘菜单里勾选「启用配置页」即可",
+            true,
+        );
         return;
     }
     let url = app::admin_url();
@@ -548,10 +571,10 @@ fn open_ui(hwnd: HWND) {
         if url.ends_with('/') {
             // no tokenised address yet: tell the user instead of opening a 401
             let hwnd = HWND(hwnd_raw as *mut _);
-            RESULTS
-                .lock()
-                .unwrap()
-                .push((RESULT_ERROR, "服务刚启动时还没打印带 token 的地址，过几秒再点一次".to_string()));
+            RESULTS.lock().unwrap().push((
+                RESULT_ERROR,
+                "服务刚启动时还没打印带 token 的地址，过几秒再点一次".to_string(),
+            ));
             unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_DONE, WPARAM(0), LPARAM(0));
             }
@@ -644,41 +667,44 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     unsafe {
-    match message {
-        WM_TRAY => {
-            let event = (lparam.0 as u32) & 0xFFFF;
-            match event {
-                WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(hwnd),
-                WM_LBUTTONDBLCLK => open_ui(hwnd),
-                _ => {}
+        match message {
+            WM_TRAY => {
+                let event = (lparam.0 as u32) & 0xFFFF;
+                match event {
+                    WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(hwnd),
+                    WM_LBUTTONDBLCLK => open_ui(hwnd),
+                    _ => {}
+                }
+                LRESULT(0)
             }
-            LRESULT(0)
-        }
-        WM_COMMAND => {
-            handle_command(hwnd, wparam.0 & 0xFFFF);
-            LRESULT(0)
-        }
-        WM_DONE => {
-            drain_results(hwnd);
-            LRESULT(0)
-        }
-        WM_CLOSE => {
-            remove_icon(hwnd);
-            let _ = DestroyWindow(hwnd);
-            LRESULT(0)
-        }
-        WM_DESTROY => {
-            let (menu, icons) = with_tray(|tray| (tray.menu, tray.handles()), (HMENU::default(), Vec::new()));
-            if !menu.is_invalid() {
-                let _ = DestroyMenu(menu);
+            WM_COMMAND => {
+                handle_command(hwnd, wparam.0 & 0xFFFF);
+                LRESULT(0)
             }
-            for handle in icons {
-                icon::destroy(handle);
+            WM_DONE => {
+                drain_results(hwnd);
+                LRESULT(0)
             }
-            PostQuitMessage(0);
-            LRESULT(0)
+            WM_CLOSE => {
+                remove_icon(hwnd);
+                let _ = DestroyWindow(hwnd);
+                LRESULT(0)
+            }
+            WM_DESTROY => {
+                let (menu, icons) = with_tray(
+                    |tray| (tray.menu, tray.handles()),
+                    (HMENU::default(), Vec::new()),
+                );
+                if !menu.is_invalid() {
+                    let _ = DestroyMenu(menu);
+                }
+                for handle in icons {
+                    icon::destroy(handle);
+                }
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, message, wparam, lparam),
         }
-        _ => DefWindowProcW(hwnd, message, wparam, lparam),
-    }
     }
 }

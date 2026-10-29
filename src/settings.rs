@@ -111,7 +111,8 @@ impl Settings {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败：{e}"))?;
         }
-        let text = serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败：{e}"))?;
+        let text =
+            serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败：{e}"))?;
         std::fs::write(&path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
     }
 
@@ -182,23 +183,23 @@ impl Settings {
     }
 
     pub fn service_config(&self) -> service::Config {
-        let mut config = service::Config::default();
-        config.port = self.port;
-        config.host = self.host.clone();
-        config.node = non_empty_path(&self.node_exe);
-        config.entry = non_empty_path(&self.entry_script);
-        config.log_dir = non_empty_path(&self.log_directory);
-        config.ready_timeout = Duration::from_secs(self.ready_timeout);
-        config.stop_timeout = Duration::from_secs(self.stop_timeout);
-        config.heap_mb = self.heap_mb;
-        config.profile = self.profile.trim().to_string();
-        config.patches = clean_list(&self.patches);
-        config.public_url = self.public_url.trim().to_string();
-        config.trusted_hosts = clean_list(&self.trusted_hosts);
-        config.tls_cert = self.tls_cert.trim().to_string();
-        config.tls_key = self.tls_key.trim().to_string();
-        config.extra_args = clean_list(&self.extra_args);
-        config
+        service::Config {
+            port: self.port,
+            host: self.host.clone(),
+            node: non_empty_path(&self.node_exe),
+            entry: non_empty_path(&self.entry_script),
+            log_dir: non_empty_path(&self.log_directory),
+            ready_timeout: Duration::from_secs(self.ready_timeout),
+            stop_timeout: Duration::from_secs(self.stop_timeout),
+            heap_mb: self.heap_mb,
+            profile: self.profile.trim().to_string(),
+            patches: clean_list(&self.patches),
+            public_url: self.public_url.trim().to_string(),
+            trusted_hosts: clean_list(&self.trusted_hosts),
+            tls_cert: self.tls_cert.trim().to_string(),
+            tls_key: self.tls_key.trim().to_string(),
+            extra_args: clean_list(&self.extra_args),
+        }
     }
 
     pub fn log_dir(&self) -> PathBuf {
@@ -240,8 +241,10 @@ mod tests {
 
     #[test]
     fn tls_needs_both_halves() {
-        let mut settings = Settings::default();
-        settings.tls_cert = "server.pem".to_string();
+        let mut settings = Settings {
+            tls_cert: "server.pem".to_string(),
+            ..Settings::default()
+        };
         assert!(settings.validate().is_err());
         settings.tls_key = "server.key".to_string();
         assert!(settings.validate().is_ok());
@@ -249,8 +252,10 @@ mod tests {
 
     #[test]
     fn profile_name_is_restricted() {
-        let mut settings = Settings::default();
-        settings.profile = "web profile".to_string();
+        let settings = Settings {
+            profile: "web profile".to_string(),
+            ..Settings::default()
+        };
         assert!(settings.validate().is_err());
     }
 }

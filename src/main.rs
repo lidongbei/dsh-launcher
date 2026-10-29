@@ -84,8 +84,7 @@ impl Options {
         while let Some(raw) = args.next() {
             let key = raw.trim_start_matches(['-', '/']).to_ascii_lowercase();
             let mut take_value = |label: &str| -> Result<String, String> {
-                args.next()
-                    .ok_or_else(|| format!("参数 {label} 缺少取值"))
+                args.next().ok_or_else(|| format!("参数 {label} 缺少取值"))
             };
             match key.as_str() {
                 "action" | "a" => {
@@ -103,9 +102,8 @@ impl Options {
                 }
                 "port" | "p" => {
                     let text = take_value(&raw)?;
-                    options.settings.port = text
-                        .parse()
-                        .map_err(|_| format!("端口不是数字：{text}"))?;
+                    options.settings.port =
+                        text.parse().map_err(|_| format!("端口不是数字：{text}"))?;
                 }
                 "host" => options.settings.host = take_value(&raw)?,
                 "heapmb" => {
@@ -119,15 +117,13 @@ impl Options {
                 "logdirectory" => options.settings.log_directory = take_value(&raw)?,
                 "readytimeout" => {
                     let text = take_value(&raw)?;
-                    options.settings.ready_timeout = text
-                        .parse()
-                        .map_err(|_| format!("超时不是整数：{text}"))?;
+                    options.settings.ready_timeout =
+                        text.parse().map_err(|_| format!("超时不是整数：{text}"))?;
                 }
                 "stoptimeout" => {
                     let text = take_value(&raw)?;
-                    options.settings.stop_timeout = text
-                        .parse()
-                        .map_err(|_| format!("超时不是整数：{text}"))?;
+                    options.settings.stop_timeout =
+                        text.parse().map_err(|_| format!("超时不是整数：{text}"))?;
                 }
                 "adminport" => {
                     let text = take_value(&raw)?;
@@ -204,10 +200,11 @@ fn main() {
         return;
     }
 
-    if options.admin && options.settings.admin_enabled {
-        if let Err(error) = admin::start(options.settings.admin_port) {
-            diag::write(&format!("config page failed to start: {error}"));
-        }
+    if options.admin
+        && options.settings.admin_enabled
+        && let Err(error) = admin::start(options.settings.admin_port)
+    {
+        diag::write(&format!("config page failed to start: {error}"));
     }
 
     let result = tray::run(tray::TrayOptions {
@@ -323,7 +320,7 @@ fn run_action(action: Action, out: Option<&std::path::Path>) -> i32 {
 }
 
 fn acquire_single_instance(port: u16) -> bool {
-    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows::Win32::System::Threading::CreateMutexW;
     use windows::core::PCWSTR;
 

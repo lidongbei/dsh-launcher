@@ -6,8 +6,8 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, CreateDIBSection, DeleteObject, GetDC, ReleaseDC, BITMAPINFO, BITMAPINFOHEADER,
-    BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
+    DeleteObject, GetDC, HGDIOBJ, ReleaseDC,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconIndirect, DestroyIcon, GetSystemMetrics, HICON, ICONINFO, SM_CXSMICON,
@@ -140,8 +140,7 @@ fn tint_brand(image: &mut Image) {
         if alpha == 0 {
             continue;
         }
-        let luminance =
-            0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+        let luminance = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
         let mut ink = (255.0 - luminance) / 207.0;
         if ink <= 0.02 {
             continue;
@@ -261,7 +260,12 @@ fn to_hicon(image: &Image) -> Result<HICON, String> {
 /// Four icons at the size the shell actually draws them.
 pub fn build_set(size: u32) -> Result<Vec<(State, HICON)>, String> {
     let mut set = Vec::new();
-    for state in [State::Running, State::Stopped, State::Working, State::Unknown] {
+    for state in [
+        State::Running,
+        State::Stopped,
+        State::Working,
+        State::Unknown,
+    ] {
         let image = render(state, size)?;
         set.push((state, to_hicon(&image)?));
     }
@@ -285,10 +289,16 @@ pub fn dump_states(dir: &Path, sizes: &[u32]) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let mut written = Vec::new();
     for size in sizes {
-        for state in [State::Running, State::Stopped, State::Working, State::Unknown] {
+        for state in [
+            State::Running,
+            State::Stopped,
+            State::Working,
+            State::Unknown,
+        ] {
             let image = render(state, *size)?;
             let path = dir.join(format!("state-{}-{size}.png", state.slug()));
-            let file = File::create(&path).map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+            let file = File::create(&path)
+                .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
             let mut encoder = png::Encoder::new(BufWriter::new(file), image.width, image.height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
@@ -330,20 +340,38 @@ mod tests {
 
     #[test]
     fn corners_stay_transparent() {
-        for state in [State::Running, State::Stopped, State::Working, State::Unknown] {
+        for state in [
+            State::Running,
+            State::Stopped,
+            State::Working,
+            State::Unknown,
+        ] {
             for size in [16, 32, 48] {
                 let image = render(state, size).expect("render should succeed");
                 assert_eq!(image.width, size);
                 assert_eq!(pixel(&image, 0, 0)[3], 0, "top-left corner should be clear");
-                assert_eq!(pixel(&image, size - 1, 0)[3], 0, "top-right corner should be clear");
-                assert_eq!(pixel(&image, 0, size - 1)[3], 0, "bottom-left should be clear");
+                assert_eq!(
+                    pixel(&image, size - 1, 0)[3],
+                    0,
+                    "top-right corner should be clear"
+                );
+                assert_eq!(
+                    pixel(&image, 0, size - 1)[3],
+                    0,
+                    "bottom-left should be clear"
+                );
             }
         }
     }
 
     #[test]
     fn badge_carries_the_state_colour() {
-        for state in [State::Running, State::Stopped, State::Working, State::Unknown] {
+        for state in [
+            State::Running,
+            State::Stopped,
+            State::Working,
+            State::Unknown,
+        ] {
             for size in [16, 32, 48] {
                 let image = render(state, size).expect("render should succeed");
                 let expected = badge_color(state);

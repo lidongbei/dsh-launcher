@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::service;
 use crate::settings::Settings;
@@ -51,7 +51,9 @@ pub fn start(preferred: u16) -> Result<u16, String> {
         .port();
     app::set_admin_port(port);
     app::set_admin_on(true);
-    diag::write(&format!("config page listening on http://127.0.0.1:{port}/"));
+    diag::write(&format!(
+        "config page listening on http://127.0.0.1:{port}/"
+    ));
 
     std::thread::spawn(move || {
         // A non-blocking accept keeps the loop responsive, so `stop` can drop
@@ -90,10 +92,10 @@ fn bind(preferred: u16) -> Result<TcpListener, String> {
     let mut ports: Vec<u16> = Vec::new();
     ports.push(preferred);
     for offset in 1..=20u32 {
-        if let Some(port) = (preferred as u32).checked_add(offset) {
-            if port <= u16::MAX as u32 {
-                ports.push(port as u16);
-            }
+        if let Some(port) = (preferred as u32).checked_add(offset)
+            && port <= u16::MAX as u32
+        {
+            ports.push(port as u16);
         }
     }
     ports.push(0);
@@ -129,7 +131,12 @@ fn handle(mut stream: TcpStream) {
         Ok(Some(request)) => request,
         Ok(None) => return,
         Err(_) => {
-            let _ = respond(&mut stream, 400, "text/plain; charset=utf-8", b"bad request");
+            let _ = respond(
+                &mut stream,
+                400,
+                "text/plain; charset=utf-8",
+                b"bad request",
+            );
             return;
         }
     };
@@ -285,7 +292,11 @@ fn route(stream: &mut TcpStream, request: Request) {
                 .get("lines")
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(200);
-            let name = request.query.get("name").map(String::as_str).unwrap_or("tray");
+            let name = request
+                .query
+                .get("name")
+                .map(String::as_str)
+                .unwrap_or("tray");
             let text = match name {
                 "service" => tail_text(service_log_path(), lines),
                 _ => tail_text(diag_path(), lines),
@@ -300,22 +311,30 @@ fn route(stream: &mut TcpStream, request: Request) {
             let mut value: Value = match serde_json::from_slice(&request.body) {
                 Ok(value) => value,
                 Err(error) => {
-                    respond_json(stream, 400, json!({ "error": format!("配置格式不对：{error}") }));
+                    respond_json(
+                        stream,
+                        400,
+                        json!({ "error": format!("配置格式不对：{error}") }),
+                    );
                     return;
                 }
             };
-            if let Some(object) = value.as_object_mut() {
-                if !object.contains_key("adminEnabled") {
-                    object.insert(
-                        "adminEnabled".to_string(),
-                        json!(app::settings().admin_enabled),
-                    );
-                }
+            if let Some(object) = value.as_object_mut()
+                && !object.contains_key("adminEnabled")
+            {
+                object.insert(
+                    "adminEnabled".to_string(),
+                    json!(app::settings().admin_enabled),
+                );
             }
             let settings: Settings = match serde_json::from_value(value) {
                 Ok(settings) => settings,
                 Err(error) => {
-                    respond_json(stream, 400, json!({ "error": format!("配置格式不对：{error}") }));
+                    respond_json(
+                        stream,
+                        400,
+                        json!({ "error": format!("配置格式不对：{error}") }),
+                    );
                     return;
                 }
             };
@@ -326,9 +345,8 @@ fn route(stream: &mut TcpStream, request: Request) {
                         "settings saved: port={} adminPort={} autostart={}",
                         settings.port, settings.admin_port, settings.autostart
                     ));
-                    let restart_required =
-                        settings.admin_port != previous.admin_port
-                            || settings.admin_enabled != previous.admin_enabled;
+                    let restart_required = settings.admin_port != previous.admin_port
+                        || settings.admin_enabled != previous.admin_enabled;
                     let mut body = state();
                     body["restartRequired"] = json!(restart_required);
                     respond_json(stream, 200, body);
@@ -354,7 +372,11 @@ fn route(stream: &mut TcpStream, request: Request) {
                 return;
             }
             if !app::try_begin() {
-                respond_json(stream, 409, json!({ "error": "已经有一个操作在进行，请稍等" }));
+                respond_json(
+                    stream,
+                    409,
+                    json!({ "error": "已经有一个操作在进行，请稍等" }),
+                );
                 return;
             }
             diag::write(&format!("config page asked for {action}"));
@@ -538,16 +560,21 @@ fn service_log_path() -> Option<PathBuf> {
     let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
         if !name.starts_with("web-") || !name.ends_with(".out.log") {
             continue;
         }
-        if let Ok(meta) = entry.metadata() {
-            if let Ok(modified) = meta.modified() {
-                if newest.as_ref().map(|(time, _)| modified > *time).unwrap_or(true) {
-                    newest = Some((modified, path));
-                }
-            }
+        if let Ok(meta) = entry.metadata()
+            && let Ok(modified) = meta.modified()
+            && newest
+                .as_ref()
+                .map(|(time, _)| modified > *time)
+                .unwrap_or(true)
+        {
+            newest = Some((modified, path));
         }
     }
     newest.map(|(_, path)| path)

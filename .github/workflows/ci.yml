@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: build & test (windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --release --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Smoke test the CLI
+        run: |
+          # The launcher is a GUI-subsystem binary, so Start-Process -Wait is the
+          # reliable way to read its exit code (0 = running, 1 = stopped).
+          $exe = "target/release/dsh-launcher.exe"
+          $process = Start-Process -FilePath $exe -ArgumentList "-Action", "Status", "-Port", "3999" -Wait -PassThru
+          if ($process.ExitCode -notin 0, 1) {
+            throw "status exited with $($process.ExitCode)"
+          }
+          New-Item -ItemType Directory -Path target/icons -Force | Out-Null
+          $icon = Start-Process -FilePath $exe -ArgumentList "-Action", "Icon", "-Out", "target/icons", "-Port", "3999" -Wait -PassThru
+          if ($icon.ExitCode -ne 0) {
+            throw "icon dump exited with $($icon.ExitCode)"
+          }
+          $states = Get-ChildItem target/icons -Filter "*.png" | Measure-Object
+          if ($states.Count -lt 4) {
+            throw "expected four rendered states, found $($states.Count)"
+          }

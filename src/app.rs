@@ -106,5 +106,3 @@ pub fn set_admin_port(port: u16) {
 pub fn admin_url() -> String {
     format!("http://127.0.0.1:{}/", admin_port())
 }
-
-

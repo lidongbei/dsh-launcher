@@ -21,10 +21,10 @@ pub fn init() -> PathBuf {
     if let Ok(mut slot) = LOG_PATH.lock() {
         *slot = Some(path.clone());
     }
-    if let Ok(meta) = fs::metadata(&path) {
-        if meta.len() > 512 * 1024 {
-            let _ = fs::rename(&path, dir.join("tray.log.old"));
-        }
+    if let Ok(meta) = fs::metadata(&path)
+        && meta.len() > 512 * 1024
+    {
+        let _ = fs::rename(&path, dir.join("tray.log.old"));
     }
     path
 }

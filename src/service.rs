@@ -5,20 +5,20 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::{Path, PathBuf};
 use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+use windows::core::PCWSTR;
 
 const AF_INET: u32 = 2;
 const AF_INET6: u32 = 23;
@@ -73,11 +73,7 @@ impl Config {
     /// The profile name handed to `dsh`, never empty.
     pub fn profile_name(&self) -> &str {
         let trimmed = self.profile.trim();
-        if trimmed.is_empty() {
-            "web"
-        } else {
-            trimmed
-        }
+        if trimmed.is_empty() { "web" } else { trimmed }
     }
 
     pub fn base_url(&self) -> String {
@@ -459,7 +455,8 @@ pub fn find_installation(config: &Config) -> Result<Installation, String> {
         .into_iter()
         .find(|install| install.node.is_file() && install.entry.is_file())
         .ok_or_else(|| {
-            "could not find node.exe plus @deepseek-ai/dsh/lib/bin.js; pass --node and --entry".to_string()
+            "could not find node.exe plus @deepseek-ai/dsh/lib/bin.js; pass --node and --entry"
+                .to_string()
         })
 }
 
@@ -513,16 +510,19 @@ pub fn start(config: &Config) -> Result<StartReport, String> {
     }
     let install = find_installation(config)?;
     let log_dir = config.log_dir();
-    fs::create_dir_all(&log_dir).map_err(|e| format!("cannot create {}: {e}", log_dir.display()))?;
+    fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("cannot create {}: {e}", log_dir.display()))?;
 
     let stamp = now_stamp();
     let out_log = log_dir.join(format!("web-{stamp}.out.log"));
     let err_log = log_dir.join(format!("web-{stamp}.err.log"));
-    let out_file = File::create(&out_log).map_err(|e| format!("cannot open {}: {e}", out_log.display()))?;
-    let err_file = File::create(&err_log).map_err(|e| format!("cannot open {}: {e}", err_log.display()))?;
+    let out_file =
+        File::create(&out_log).map_err(|e| format!("cannot open {}: {e}", out_log.display()))?;
+    let err_file =
+        File::create(&err_log).map_err(|e| format!("cannot open {}: {e}", err_log.display()))?;
 
     let mut command = Command::new(&install.node);
-    append_arguments(&mut command, &config, &install.entry);
+    append_arguments(&mut command, config, &install.entry);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(out_file))
@@ -600,7 +600,9 @@ pub fn printed_urls(config: &Config) -> Vec<String> {
     let needle_port = format!(":{}", config.port);
     let mut urls: Vec<String> = Vec::new();
     for (_, path) in logs.iter().take(40) {
-        let Ok(mut file) = File::open(path) else { continue };
+        let Ok(mut file) = File::open(path) else {
+            continue;
+        };
         let mut text = String::new();
         if file.read_to_string(&mut text).is_err() {
             continue;
@@ -733,31 +735,40 @@ pub fn open_folder(path: &Path) -> bool {
     result.0 as isize > 32
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn preview_mirrors_the_arguments() {
-        let mut config = Config::default();
-        config.port = 3096;
-        config.public_url = "https://app.example/ui/".to_string();
-        config.trusted_hosts = vec!["app.example".to_string()];
-        config.patches = vec!["overlays/extra.yml".to_string()];
-        config.extra_args = vec!["--log-level".to_string(), "debug".to_string()];
+        let config = Config {
+            port: 3096,
+            public_url: "https://app.example/ui/".to_string(),
+            trusted_hosts: vec!["app.example".to_string()],
+            patches: vec!["overlays/extra.yml".to_string()],
+            extra_args: vec!["--log-level".to_string(), "debug".to_string()],
+            ..Config::default()
+        };
         let preview = preview(&config);
-        assert!(preview.contains(" web --patch overlays/extra.yml"), "{preview}");
+        assert!(
+            preview.contains(" web --patch overlays/extra.yml"),
+            "{preview}"
+        );
         assert!(preview.contains("--port 3096"), "{preview}");
-        assert!(preview.contains("--public-url https://app.example/ui/"), "{preview}");
+        assert!(
+            preview.contains("--public-url https://app.example/ui/"),
+            "{preview}"
+        );
         assert!(preview.contains("--trusted-host app.example"), "{preview}");
         assert!(preview.ends_with("--log-level debug"), "{preview}");
     }
 
     #[test]
     fn an_empty_profile_falls_back_to_web() {
-        let mut config = Config::default();
-        config.profile = "   ".to_string();
+        let config = Config {
+            profile: "   ".to_string(),
+            ..Config::default()
+        };
         assert_eq!(config.profile_name(), "web");
         assert!(preview(&config).contains(" bin.js web "));
     }

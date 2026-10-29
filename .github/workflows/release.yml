@@ -1,0 +1,87 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. v0.1.0. Leave empty to only build the zip artifact."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: package & release (windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --release --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        id: pack
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $name = "dsh-launcher-$version-win64"
+          # Stage outside the repo: the shipped exe must sit next to a README and
+          # the preview image, and the zip should keep that folder as its root.
+          $stage = Join-Path $env:RUNNER_TEMP $name
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item target/release/dsh-launcher.exe $stage
+          Copy-Item packaging/README.txt $stage
+          Copy-Item docs/preview.png $stage
+          $zip = Join-Path $env:GITHUB_WORKSPACE "$name.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip -CompressionLevel Optimal
+          $size = [math]::Round((Get-Item $zip).Length / 1MB, 2)
+          "packaged $zip ($size MB)"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "zip=$name.zip" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: ${{ steps.pack.outputs.zip }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: dsh-launcher ${{ steps.pack.outputs.version }}
+          files: ${{ steps.pack.outputs.zip }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Windows 10/11 x64 绿色版，解压后双击 `dsh-launcher.exe` 即可在托盘里运行。
+
+            - 自带启停引擎，不依赖任何外部脚本
+            - 配置页默认 <http://127.0.0.1:3089/>
+            - 静态 CRT，不需要安装运行库

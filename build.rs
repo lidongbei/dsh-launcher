@@ -7,15 +7,15 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/launcher.rc");
     println!("cargo:rerun-if-changed=assets/launcher.ico");
 
-    if let Some(dir) = find_rc_dir() {
-        if let Some(existing) = std::env::var_os("PATH") {
-            let mut paths = vec![dir];
-            paths.extend(std::env::split_paths(&existing));
-            if let Ok(joined) = std::env::join_paths(paths) {
-                // SAFETY: build scripts are single threaded here, and PATH is
-                // only read afterwards by the resource compiler.
-                unsafe { std::env::set_var("PATH", joined) };
-            }
+    if let Some(dir) = find_rc_dir()
+        && let Some(existing) = std::env::var_os("PATH")
+    {
+        let mut paths = vec![dir];
+        paths.extend(std::env::split_paths(&existing));
+        if let Ok(joined) = std::env::join_paths(paths) {
+            // SAFETY: build scripts are single threaded here, and PATH is
+            // only read afterwards by the resource compiler.
+            unsafe { std::env::set_var("PATH", joined) };
         }
     }
 
