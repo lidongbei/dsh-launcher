@@ -164,6 +164,8 @@
         <div class="row"><label>监听地址</label><input type="text" name="host" required></div>
         <div class="row"><label>node.exe</label><input type="text" name="nodeExe" placeholder="留空自动查找"></div>
         <div class="row"><label>bin.js</label><input type="text" name="entryScript" placeholder="留空自动查找"></div>
+        <div class="row"><label>运行目录</label><input type="text" name="workDir" placeholder="会话命令在这个目录里执行；留空用用户主目录"></div>
+        <div class="hint">dsh 把自身的工作目录当作会话工作区，把这里设成你的项目目录即可</div>
         <div class="row"><label>日志目录</label><input type="text" name="logDirectory" placeholder="留空使用 %USERPROFILE%\.dsh\logs"></div>
         <div class="row"><label>堆内存上限</label><input type="number" name="heapMb" min="0" max="32768" step="256" list="heap-presets" placeholder="0 = 不设置，用 Node 默认"><datalist id="heap-presets"><option value="0">默认（不设置）</option><option value="2048">2 GB</option><option value="4096">4 GB（推荐）</option><option value="8192">8 GB</option><option value="16384">16 GB</option></datalist></div>
         <div class="row"><label>启动超时</label><input type="number" name="readyTimeout" step="1" min="10" max="900"></div>
@@ -176,7 +178,7 @@
         <div class="row"><label>--tls-cert</label><input type="text" name="tlsCert" placeholder="PEM 证书链；留空走 HTTP"></div>
         <div class="row"><label>--tls-key</label><input type="text" name="tlsKey" placeholder="PEM 私钥；证书和私钥要成对"></div>
         <div class="row tall"><label>其他参数</label><textarea name="extraArgs" rows="3" placeholder="每行一个，原样附在命令末尾"></textarea></div>
-        <div class="row tall"><label>启动命令</label><code class="cmd" id="command">—</code></div>
+        <div class="row tall"><label>运行命令</label><code class="cmd" id="command">—</code></div>
         <div class="sep"></div>
         <div class="row"><label>配置页端口</label><input type="number" name="adminPort" step="1" min="1" max="65535"></div>
         <div class="sep"></div>
@@ -213,7 +215,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $('form');
-  const fields = ['port', 'host', 'nodeExe', 'entryScript', 'logDirectory', 'heapMb',
+  const fields = ['port', 'host', 'nodeExe', 'entryScript', 'workDir', 'logDirectory', 'heapMb',
     'readyTimeout', 'stopTimeout', 'profile', 'patches', 'publicUrl', 'trustedHosts',
     'tlsCert', 'tlsKey', 'extraArgs', 'adminPort', 'autostart'];
   const listFields = ['patches', 'trustedHosts', 'extraArgs'];
@@ -297,7 +299,6 @@
     adminLink.textContent = state.adminUrl;
     adminLink.href = state.adminUrl;
     $('log-dir').textContent = state.logDir;
-    $('command').textContent = state.command || '—';
     $('settings-file').textContent = state.settingsFile;
     $('btn-start').disabled = busy || running;
     $('btn-restart').disabled = busy || !running;
@@ -306,7 +307,10 @@
     $('btn-quit').disabled = busy;
     $('btn-quit-stop').disabled = busy;
 
-    if (!dirty) fill(state.settings);
+    if (!dirty) {
+      fill(state.settings);
+      $('command').textContent = state.command || '—';
+    }
 
     if (state.last && state.last.message && state.last.message !== lastMessage) {
       lastMessage = state.last.message;
@@ -324,6 +328,25 @@
       $('state-title').firstChild.textContent = '无法连接托盘';
       $('state-sub').textContent = error.message;
     }
+  }
+
+  // The preview follows the form, not the saved settings: the launcher's own
+  // argument builder answers each request, so the line cannot drift from what
+  // "启动" would actually run.
+  let previewSeq = 0;
+  let previewTimer = 0;
+  async function updatePreview() {
+    const seq = ++previewSeq;
+    try {
+      const result = await api('/api/preview', { method: 'POST', body: collect() });
+      if (seq === previewSeq) $('command').textContent = result.command || '—';
+    } catch (error) {
+      if (seq === previewSeq) $('command').textContent = '—（' + error.message + '）';
+    }
+  }
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(updatePreview, 160);
   }
 
   async function act(action) {
@@ -369,12 +392,14 @@
   form.addEventListener('input', () => {
     dirty = true;
     setFormState('有未保存的修改', '#d97706');
+    schedulePreview();
   });
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
       const result = await api('/api/settings', { method: 'POST', body: collect() });
+      previewSeq += 1;   // a preview still in flight must not overwrite this line
       dirty = false;
       render(result);
       setFormState('已保存', '#16a34a');
@@ -390,6 +415,7 @@
 
   $('btn-reset').addEventListener('click', () => {
     if (snapshot) fill(snapshot);
+    updatePreview();
   });
   $('btn-start').addEventListener('click', () => act('start'));
   $('btn-restart').addEventListener('click', () => act('restart'));

@@ -1,7 +1,7 @@
 //! Everything the user can tune, persisted as JSON so the configuration page
 //! and the tray always agree.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,9 @@ pub struct Settings {
     pub node_exe: String,
     /// Empty means "find it automatically".
     pub entry_script: String,
+    /// Directory the service starts in, which is the workspace dsh runs the
+    /// session's commands in. Empty means the user's home directory.
+    pub work_dir: String,
     /// Empty means `%USERPROFILE%\.dsh\logs`.
     pub log_directory: String,
     /// Upper bound while waiting for the service to answer.
@@ -56,6 +59,7 @@ impl Default for Settings {
             host: "127.0.0.1".to_string(),
             node_exe: String::new(),
             entry_script: String::new(),
+            work_dir: String::new(),
             log_directory: String::new(),
             ready_timeout: 120,
             stop_timeout: 30,
@@ -152,6 +156,10 @@ impl Settings {
         if self.tls_cert.trim().is_empty() != self.tls_key.trim().is_empty() {
             return Err("TLS 证书和私钥要成对填写".to_string());
         }
+        let work_dir = self.work_dir.trim();
+        if !work_dir.is_empty() && !Path::new(work_dir).is_dir() {
+            return Err(format!("运行目录不存在：{work_dir}"));
+        }
         if self
             .extra_args
             .iter()
@@ -173,6 +181,9 @@ impl Settings {
         if self.host.trim().is_empty() {
             self.host = "127.0.0.1".to_string();
         }
+        if !self.work_dir.trim().is_empty() && !Path::new(self.work_dir.trim()).is_dir() {
+            self.work_dir.clear();
+        }
         if self.admin_port == 0 || self.admin_port == self.port {
             self.admin_port = if self.port == DEFAULT_ADMIN_PORT {
                 self.port.saturating_add(1)
@@ -188,6 +199,7 @@ impl Settings {
             host: self.host.clone(),
             node: non_empty_path(&self.node_exe),
             entry: non_empty_path(&self.entry_script),
+            work_dir: non_empty_path(&self.work_dir),
             log_dir: non_empty_path(&self.log_directory),
             ready_timeout: Duration::from_secs(self.ready_timeout),
             stop_timeout: Duration::from_secs(self.stop_timeout),
@@ -257,5 +269,23 @@ mod tests {
             ..Settings::default()
         };
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn a_work_dir_must_exist() {
+        let missing = Settings {
+            work_dir: std::env::temp_dir()
+                .join("dsh-launcher-no-such-dir")
+                .to_string_lossy()
+                .to_string(),
+            ..Settings::default()
+        };
+        assert!(missing.validate().is_err());
+        let present = Settings {
+            work_dir: std::env::temp_dir().to_string_lossy().to_string(),
+            ..Settings::default()
+        };
+        assert!(present.validate().is_ok());
+        assert!(Settings::default().validate().is_ok());
     }
 }

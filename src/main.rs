@@ -35,7 +35,7 @@ const HELP: &str = r#"DSH Launcher -- dsh web 的托盘启动器
   -Host <地址>            默认 127.0.0.1
   -HeapMb <MB>            传给 node 的 --max-old-space-size，默认 0（不设置）
   -NodeExe <路径>         指定 node.exe（默认自动查找）
-  -EntryScript <路径>     指定 dsh 的 bin.js（默认自动查找）
+  -EntryScript <路径>     指定 dsh 的 bin.js（默认自动查找，找不到时用 npx 兜底）
   -LogDirectory <目录>    服务日志目录，默认 %USERPROFILE%\.dsh\logs
   -ReadyTimeout <秒>      等待服务就绪的超时，默认 120
   -StopTimeout <秒>       等待服务退出的超时，默认 30

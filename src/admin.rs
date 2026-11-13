@@ -303,6 +303,39 @@ fn route(stream: &mut TcpStream, request: Request) {
             };
             let _ = respond(stream, 200, "text/plain; charset=utf-8", text.as_bytes());
         }
+        ("POST", "/api/preview") => {
+            // Read-only: the page asks what the settings it currently holds
+            // would run, before saving them. Deliberately no guard header —
+            // nothing is written — and no `validate()`, so a draft with a bad
+            // value still shows the command it would produce.
+            let parsed: Value = match serde_json::from_slice(&request.body) {
+                Ok(value) => value,
+                Err(error) => {
+                    respond_json(
+                        stream,
+                        400,
+                        json!({ "error": format!("配置格式不对：{error}") }),
+                    );
+                    return;
+                }
+            };
+            let settings: Settings = match serde_json::from_value(parsed) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    respond_json(
+                        stream,
+                        400,
+                        json!({ "error": format!("配置格式不对：{error}") }),
+                    );
+                    return;
+                }
+            };
+            respond_json(
+                stream,
+                200,
+                json!({ "command": service::preview(&settings.service_config()) }),
+            );
+        }
         ("POST", "/api/settings") => {
             if !guarded(&request) {
                 respond_json(stream, 403, json!({ "error": "缺少安全头" }));

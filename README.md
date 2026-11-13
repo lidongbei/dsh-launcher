@@ -12,16 +12,16 @@
 
 - **图标即状态**：DeepSeek 鲸鱼图标，右下角圆点显示运行状态
   - 绿色 `#22C55E` 运行中 · 红色 `#EF4444` 已停止 · 橙色 `#F59E0B` 正在操作 · 灰色未知
-- **不后台空转**：没有定时轮询线程，状态在打开菜单、执行动作、打开配置页时才刷新（托盘进程闲置 CPU 为 0）
+- **不后台轮询**：没有定时探测线程——运行中只靠一个等待句柄盯住监听的进程（0 CPU），只有图标是「已停止」时才每 3 秒探一次端口。别处停掉服务图标立刻变红，别处把它拉起来图标自己变绿，都不用点菜单
 - **双击打开 Web UI**：自动从 dsh 启动日志里取出带 `?token=` 的地址，不会撞上 `401 dsh web authentication required`
 - **右键菜单**：打开 Web UI / 启动 / 重启 / 停止 / 打开日志目录 / 退出
 - **启动即就绪**：托盘一起来就把服务拉起来（`-NoAutoStart` 可关）
-- **自动定位安装**：先用正在运行的实例里的 `node.exe` + `bin.js`，找不到就扫 `%USERPROFILE%\.sdk\cache\node\**\node_modules\@deepseek-ai\dsh\lib\bin.js`
+- **自动定位安装**：按「显式指定 → 环境变量 → `%USERPROFILE%\.sdk\cache\node\**` 下最新的 `node.exe` 加同目录 `node_modules\@deepseek-ai\dsh\lib\bin.js` → PATH 上的 node → npx 缓存 → 全局 npm 目录」找；都没有时退回 `node npx-cli.js -y @deepseek-ai/dsh web`，`npx` 装的一样能跑
 - **操作不卡界面**：启停都在后台线程跑，完成/失败弹气泡提示
 - **单实例**：同一端口只允许一个托盘；重复启动会静默退出
 - **无控制台窗口**：`windows_subsystem = "windows"`，不会闪黑框
 - **配置页**：内置一个本地网页（默认 `http://127.0.0.1:3089/`），改端口/路径/超时、一键启停；菜单里的「启用配置页」可以随时开关
-- **完整的 dsh 启动参数**：profile、`--patch` 叠加层、`--public-url`、`--trusted-host`、TLS 证书/私钥、任意附加参数都能在页面里配，页面底部实时显示最终拼出来的命令行
+- **完整的 dsh 启动参数**：profile、`--patch` 叠加层、`--public-url`、`--trusted-host`、TLS 证书/私钥、任意附加参数都能在页面里配；页面底部「运行命令」跟着表单实时重算，改一个字就能看到最终会执行的命令行
 - **参数会记住**：所有设置存到 `%LOCALAPPDATA%\DshLauncher\settings.json`，下次启动自动读取，命令行参数只覆盖本次运行
 
 ## 快速开始
@@ -41,9 +41,9 @@ target\release\dsh-launcher.exe
 
 | 菜单项 | 作用 |
 | --- | --- |
-| 状态：运行中 / 已停止 | 只读，点击菜单时自动刷新 |
+| 状态：运行中 / 已停止 | 只读，点击菜单时刷新；服务自己退出时图标会立刻变红 |
 | 打开 Web UI | 用带 token 的地址打开默认浏览器 |
-| 启动服务 | 启动 `dsh web`，等端口 + HTTP 就绪 |
+| 启动服务 | 启动 `dsh web`，等端口就绪并显示监听 PID |
 | 重启服务 | 先停后起，等新实例就绪 |
 | 停止服务 | 结束整个进程树并等端口释放 |
 | 打开日志目录 | 打开 `%USERPROFILE%\.dsh\logs` |
@@ -53,6 +53,17 @@ target\release\dsh-launcher.exe
 | 停止服务并退出 | 先停服务，再关托盘 |
 
 左键双击图标 = 打开 Web UI。
+
+## 状态是怎么判断的
+
+两种手段分工明确：**事件管实时，探测管准确**。
+
+- **探测（准）**：打开菜单、执行动作、配置页 `/api/state`、命令行 `-Action Status` 时，都对 `127.0.0.1:<port>` 做一次连接探测，连上即运行中；同时用 `GetExtendedTcpTable` 查监听该端口的 PID，所以显示的是真正的服务进程。托盘里这类探测只给 120 ms 预算（没有监听者时本机不回 RST，只能靠超时判定），命令行仍给 300 ms。
+- **事件（快）**：托盘盯的是「监听该端口的 PID」——不是 launcher 的直接子进程，因为 `npx` 时真正的监听者是 node 孙进程——记录该 PID 的启动时间作为代次，在后台线程里持一个同步句柄 `WaitForSingleObject`，阻塞在内核、0 CPU。进程一退，用 `PostMessage` 通知窗口线程：先给 8 秒「重建窗口」，每 120 ms 看端口有没有新主人（自动重启、崩溃后由别的进程拉起来都算），有就静默换成绿色并继续盯新 PID；没有才变红并弹「服务已停止（进程 N 退出后没有再起来）」。
+- **兜底心跳**：托盘处于「服务已停止」时每 3 秒探一次端口，服务被外部（命令行、另一台机器上的脚本、`dsh` 自己的启动器）拉起来后图标自己变绿。运行中则不轮询——由上面那个句柄负责。因此闲置 CPU：运行中 0，停止态实测 60 秒 0 个 CPU tick（低于 10 ms 计时粒度）。
+- **再兜底**：进程活着但卡死、端口被别的程序抢走、node 自己换端口重启，这些通知盖不住，仍由打开菜单时的探测纠正（多余的退出消息会按 PID + 启动时代次校验丢掉，不会把新实例误标成已停止）。
+- **单实例**：托盘用 `Local\DshLauncherTray` 互斥量认一个主托盘，只有它负责监听与探测，第二个托盘不会抢图标，避免「杀了一个托盘、剩下的那个影子托盘还占着状态」。
+- 退出托盘不影响服务：句柄随托盘进程关闭，服务继续跑。
 
 ## 配置页
 
@@ -67,8 +78,8 @@ http://127.0.0.1:3089/          # 菜单「打开配置页」，或 dsh-launcher
 | 区域 | 内容 |
 | --- | --- |
 | 服务状态 | 运行中/已停止、监听 PID、地址、日志目录（页面打开时每 2 秒刷新，托盘本身不轮询） |
-| 启动参数 | 端口、监听地址、node.exe、bin.js、日志目录、堆内存上限、启动/停止超时、配置页端口、自动启动 |
-| dsh 参数 | profile（默认 `web`）、`--patch`（每行一个）、`--public-url`、`--trusted-host`（每行一个）、`--tls-cert` / `--tls-key`、其他附加参数（每行一个，原样追加），并显示最终的启动命令 |
+| 启动参数 | 端口、监听地址、node.exe、bin.js、运行目录、日志目录、堆内存上限、启动/停止超时、配置页端口、自动启动 |
+| dsh 参数 | profile（默认 `web`）、`--patch`（每行一个）、`--public-url`、`--trusted-host`（每行一个）、`--tls-cert` / `--tls-key`、其他附加参数（每行一个，原样追加）；底部「运行命令」随表单实时刷新 |
 | 操作 | 启动 / 重启 / 停止 / 打开 Web UI / 退出托盘 / 停止服务并退出 |
 | 日志 | 托盘日志与服务日志的实时尾巴 |
 
@@ -76,6 +87,7 @@ http://127.0.0.1:3089/          # 菜单「打开配置页」，或 dsh-launcher
 
 - 配置页的开关在**托盘菜单**里（「启用配置页」勾选状态）；关掉后监听线程退出、3089 端口立即释放（连不上，而不是返回 503），重新勾选会马上把监听重新建起来。
 - 参数改完点保存就落盘到 `%LOCALAPPDATA%\DshLauncher\settings.json`，下次启动照旧生效；用命令行 `-Port` 之类临时覆盖时不会改写这个文件。
+- 「运行目录」是 `dsh web` 启动时的工作目录：dsh 把自身 cwd 当作会话工作区，dsh 的会话命令、注入的 runtime context 里的 `Current working directory` 都在这里。留空用用户主目录（`%USERPROFILE%`），填了不存在的目录保存时会报「运行目录不存在」，启动时也会先检查一次再拉起 node。改它只影响**之后**启动的服务。
 
 - 改「服务端口」等参数只影响**之后**的启动；改「配置页端口」需要重启托盘才生效（页面会提示）。
 - 校验失败会直接返回中文错误，例如「服务端口不能为 0」「TLS 证书和私钥要成对填写」，不会写入文件。
@@ -89,7 +101,8 @@ HTTP 接口（给脚本用，记得带 `X-Dsh-Launcher: 1`）：
 | --- | --- | --- |
 | GET | `/api/state` | 状态 + 当前设置 + 上次操作结果 |
 | GET | `/api/settings` | 只读当前设置 |
-| POST | `/api/settings` | 校验并保存设置（含 `profile` / `patches` / `publicUrl` / `trustedHosts` / `tlsCert` / `tlsKey` / `extraArgs`） |
+| POST | `/api/settings` | 校验并保存设置（含 `workDir` / `profile` / `patches` / `publicUrl` / `trustedHosts` / `tlsCert` / `tlsKey` / `extraArgs`） |
+| POST | `/api/preview` | 传入一份（未保存的）设置，返回它会生成的命令行，不落盘、不校验 |
 | POST | `/api/action` | `{"action":"start"|"restart"|"stop"}` |
 | POST | `/api/open` | 用带 token 的地址打开浏览器 |
 | POST | `/api/quit` | `{"stopService":true|false}` 退出托盘 |
@@ -117,7 +130,7 @@ dsh-launcher.exe -Help
 | `-Port` | `3080` | 服务端口；非 3080 时单实例锁也随之区分 |
 | `-Host` | `127.0.0.1` | 监听地址 |
 | `-NodeExe` | 自动探测 | 覆盖 node.exe 路径 |
-| `-EntryScript` | 自动探测 | 覆盖 `bin.js` 路径 |
+| `-EntryScript` | 自动探测 | 覆盖 `bin.js` 路径（不会自动找 npx 缓存里的那份） |
 | `-LogDirectory` | `%USERPROFILE%\.dsh\logs` | 服务输出日志目录 |
 | `-HeapMb` | `0` | 传给 node 的 `--max-old-space-size`（MB），0 表示用 Node 默认值 |
 | `-ReadyTimeout` | `180` | 启动/重启等待就绪上限（秒） |
@@ -152,7 +165,7 @@ cargo test
 src/
 ├── main.rs      命令行解析、单实例、动作分发、控制台附着
 ├── tray.rs      隐藏窗口 + 托盘图标 + 弹出菜单 + 后台线程
-├── service.rs   启停引擎：找 node/bin.js、探端口与 PID、等 HTTP 就绪、读 token 地址
+├── service.rs   启停引擎：找 node/bin.js（含 npx）、探端口与 PID、等就绪、读 token 地址、等服务进程退出
 ├── icon.rs      图标渲染：鲸鱼母版 + 状态角标（含单元测试）
 ├── settings.rs  设置模型：校验、读写 %LOCALAPPDATA%\DshLauncher\settings.json
 ├── app.rs       进程内共享状态：当前设置、token 地址缓存、忙标志、退出请求

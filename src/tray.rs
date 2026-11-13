@@ -3,10 +3,13 @@
 
 use std::cell::RefCell;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{
+    ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_DELETE,
     NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
@@ -22,6 +25,13 @@ use crate::service;
 
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_DONE: u32 = WM_APP + 2;
+/// A watched `dsh web` process ended; `wparam` carries its PID.
+const WM_SERVICE_EXIT: u32 = WM_APP + 3;
+/// The watcher's settle window ran out: the service really is gone.
+const WM_SETTLE: u32 = WM_APP + 4;
+/// The stopped-state re-check timer beat.
+const WM_WATCHDOG: u32 = WM_APP + 5;
+
 const TRAY_ID: u32 = 1;
 
 const ID_STATUS: usize = 1000;
@@ -39,11 +49,28 @@ const ID_EXIT_STOP: usize = 1007;
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 /// Finished work lands here; the window proc drains it.
 static RESULTS: Mutex<Vec<(i32, String)>> = Mutex::new(Vec::new());
+/// Bumped on every `dsh web` exit we learn about, so the settle poll started
+/// for the previous process gives up instead of reporting the new one.
+static EXITS: AtomicUsize = AtomicUsize::new(0);
+/// A settle thread is running; a second one would only race it.
+static SETTLING: AtomicBool = AtomicBool::new(false);
+/// True once this process owns the tray. A second tray must not watch the same
+/// service: it would announce the same exit and interfere with the first.
+static PRIMARY: AtomicBool = AtomicBool::new(false);
 
 /// A worker finished: 0 = success, 1 = failure, 2 = a resolved address.
 const RESULT_OK: i32 = 0;
 const RESULT_ERROR: i32 = 1;
 const RESULT_URL: i32 = 2;
+
+/// How long the watcher keeps looking for a replacement process once the one
+/// it waited on is gone (`dsh` may restart itself by re-executing), and how
+/// often it looks while it does.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(8);
+const SETTLE_STEP: std::time::Duration = std::time::Duration::from_millis(120);
+/// A probe connects in microseconds while something listens; a closed port on
+/// this machine swallows the SYN, so keep the budget far below the 300 ms one.
+const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_millis(120);
 
 struct Tray {
     menu: HMENU,
@@ -80,7 +107,10 @@ pub fn run(options: TrayOptions) -> Result<(), String> {
         ..Default::default()
     };
     if unsafe { RegisterClassW(&window_class) } == 0 {
-        return Err("RegisterClassW failed".to_string());
+        return Err(format!(
+            "RegisterClassW failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
 
     let title = wide("DSH Launcher");
@@ -103,16 +133,30 @@ pub fn run(options: TrayOptions) -> Result<(), String> {
     };
     WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
 
+    let first_tray = only_instance();
+    PRIMARY.store(first_tray, Ordering::SeqCst);
+    if first_tray {
+        start_watchdog();
+    } else {
+        // A second tray (Start with Windows firing again) exists: it keeps its
+        // icon, but leaves the watching to the one that owns the tray.
+        diag::write("another tray already owns the port; this one does not watch");
+    }
+
     let size = icon::icon_size();
     let icons = icon::build_set(size)?;
     let menu = build_menu()?;
 
     let config = app::config();
-    let state = if service::is_running(config.port) {
+    let state = if service::is_running_with(config.port, PROBE_BUDGET) {
         State::Running
     } else {
         State::Stopped
     };
+    if state == State::Running {
+        // adopt an instance someone else started (a terminal, `npx`, ...)
+        watch_current();
+    }
 
     TRAY.with(|slot| {
         *slot.borrow_mut() = Some(Tray { menu, icons, state });
@@ -148,7 +192,6 @@ pub fn run(options: TrayOptions) -> Result<(), String> {
     message_loop();
     Ok(())
 }
-
 fn message_loop() {
     let mut message = MSG::default();
     loop {
@@ -356,6 +399,111 @@ enum Action {
     Stop,
 }
 
+/// Waits on the process that owns the port and posts `WM_SERVICE_EXIT` when it
+/// dies, so the icon turns red the moment the service goes away instead of on
+/// the next menu click.
+///
+/// The owner, not our direct child: with `npx` the listener is a grandchild.
+fn watch_service(pid: u32) {
+    if pid == 0 || pid == app::service_pid() || !PRIMARY.load(Ordering::SeqCst) {
+        return;
+    }
+    let hwnd_raw = WINDOW.load(Ordering::SeqCst);
+    if hwnd_raw == 0 {
+        return;
+    }
+    let key = service::process_key(pid);
+    app::set_service_pid(pid);
+    app::set_service_started(key.map(|key| key.started).unwrap_or(0));
+    diag::write(&format!("watching service process {pid}"));
+    std::thread::spawn(move || {
+        let hwnd = HWND(hwnd_raw as *mut _);
+        let exited = match key {
+            Some(key) => service::wait_for_key(key),
+            None => service::wait_for_exit(pid),
+        };
+        if exited {
+            report_exit(hwnd, pid);
+        }
+    });
+}
+
+fn report_exit(hwnd: HWND, pid: u32) {
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_SERVICE_EXIT, WPARAM(pid as usize), LPARAM(0));
+    }
+}
+
+/// The single tray: a second launch (Start with Windows firing twice, a user
+/// double-click) keeps its icon but must not watch the same service.
+const INSTANCE: &str = "Local\\DshLauncherTray";
+
+fn only_instance() -> bool {
+    let name = wide(INSTANCE);
+    let created = unsafe { CreateMutexW(None, false, PCWSTR::from_raw(name.as_ptr())) };
+    match created {
+        Ok(_) => unsafe { GetLastError() != ERROR_ALREADY_EXISTS },
+        Err(_) => true,
+    }
+}
+
+/// Polls while the port is still held after the watched process is gone: `dsh`
+/// may restart itself behind the same port, or a new instance may take over.
+/// Returns true when the port came back, false when nothing answers until the
+/// settle window runs out (or an action takes over).
+fn settle_and_announce(port: u16, pid: u32, generation: usize) -> bool {
+    let deadline = std::time::Instant::now() + SETTLE;
+    loop {
+        if EXITS.load(Ordering::SeqCst) != generation || app::busy() {
+            return false;
+        }
+        if let Some(owner) = service::owner_pid(port).filter(|owner| *owner != pid) {
+            // someone listens again: follow the new process instead of
+            // blinking the icon through a false "stopped"
+            watch_service(owner);
+            diag::write(&format!("service is back on port {port} as pid {owner}"));
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(SETTLE_STEP);
+    }
+}
+
+/// Starts the settle poll for a process the tray was watching. Runs off the
+/// window thread; the window thread does the announcing.
+fn begin_settle(hwnd: HWND, pid: u32) {
+    if SETTLING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let generation = EXITS.fetch_add(1, Ordering::SeqCst) + 1;
+    let port = app::config().port;
+    let hwnd_raw = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let came_back = settle_and_announce(port, pid, generation);
+        if !came_back {
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(hwnd_raw as *mut _)),
+                    WM_SETTLE,
+                    WPARAM(pid as usize),
+                    LPARAM(0),
+                );
+            }
+        }
+        SETTLING.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Watches whatever currently listens on the port, if anything.
+fn watch_current() {
+    let config = app::config();
+    if let Some(pid) = service::owner_pid(config.port) {
+        watch_service(pid);
+    }
+}
+
 fn begin(action: Action) {
     let config = app::config();
     if !app::try_begin() {
@@ -447,12 +595,19 @@ fn drain_results(hwnd: HWND) {
                     });
                 }
                 let running = app::config();
-                let state = if service::is_running(running.port) {
+                let state = if service::is_running_with(running.port, PROBE_BUDGET) {
                     State::Running
                 } else {
                     State::Stopped
                 };
                 with_tray_mut(|tray| tray.state = state);
+                if state == State::Running {
+                    watch_current();
+                } else {
+                    // the process is gone: forget the watcher and the token URL
+                    app::set_service_pid(0);
+                    app::set_url(None);
+                }
                 refresh_icon(hwnd);
                 if code == RESULT_OK {
                     balloon(hwnd, "DSH Web", &text, false);
@@ -465,6 +620,102 @@ fn drain_results(hwnd: HWND) {
     }
 }
 
+/// A tray that believes the service is stopped re-checks the port every few
+/// seconds. Nothing ticks while the icon is green (the wait handle covers
+/// that), and a stopped tray costs one connect with a 120 ms cap per beat:
+/// measured at ~0.1 % of one core, because a live port answers at once.
+const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(3);
+
+fn start_watchdog() {
+    let hwnd_raw = WINDOW.load(Ordering::SeqCst);
+    if hwnd_raw == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(WATCHDOG);
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(hwnd_raw as *mut _)),
+                    WM_WATCHDOG,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }
+    });
+}
+
+fn watchdog_beat(hwnd: HWND) {
+    if app::busy() || SETTLING.load(Ordering::SeqCst) {
+        return;
+    }
+    if app::service_pid() != 0 || with_tray(|tray| tray.state, State::Unknown) == State::Running {
+        // the wait handle reports this death; no need to probe
+        return;
+    }
+    adopt_if_back(hwnd);
+}
+
+/// Spots a service that came back without the tray being told: restarted from
+/// another terminal, started again by us while we were told to stop waiting,
+/// or one the settle window missed. Only runs on the window thread and only
+/// while nothing else is going on, so it never fights an action.
+fn adopt_if_back(hwnd: HWND) {
+    if app::busy() || app::service_pid() != 0 {
+        return;
+    }
+    let state = with_tray(|tray| tray.state, State::Unknown);
+    if state == State::Running {
+        return;
+    }
+    let config = app::config();
+    if !service::is_running_with(config.port, PROBE_BUDGET) {
+        return;
+    }
+    diag::write(&format!("service is back on port {}", config.port));
+    with_tray_mut(|tray| tray.state = State::Running);
+    refresh_icon(hwnd);
+    watch_current();
+}
+
+/// Marks the service as stopped once the watcher is sure nothing answers any
+/// more: repaint, drop the tokenised address, and say it out loud unless the
+/// tray already showed a stop.
+fn announce_stopped(hwnd: HWND, gone: Option<u32>) {
+    if service::is_running_with(app::config().port, PROBE_BUDGET) {
+        // something listens again (possibly already watched): follow it
+        watch_current();
+        return;
+    }
+    let previous = with_tray(|tray| tray.state, State::Unknown);
+    with_tray_mut(|tray| tray.state = State::Stopped);
+    refresh_icon(hwnd);
+    app::set_url(None);
+    // The balloon is what tells a user who is not watching the icon; a tray
+    // that already showed red has said it once and stays quiet.
+    if previous != State::Stopped && previous != State::Working {
+        let mut data = notify_data(hwnd);
+        data.uFlags = NIF_INFO | NIF_ICON | NIF_TIP;
+        data.hIcon = icon_of(State::Stopped);
+        data.szTip = tip_text(&tooltip(State::Stopped));
+        data.dwInfoFlags = NIIF_WARNING;
+        let title: Vec<u16> = "DSH Web".encode_utf16().collect();
+        let text: Vec<u16> = match gone {
+            Some(pid) => format!("服务已停止（进程 {pid} 退出后没有再起来）"),
+            None => "服务已停止".to_string(),
+        }
+        .encode_utf16()
+        .take(240)
+        .collect();
+        data.szInfoTitle[..title.len()].copy_from_slice(&title);
+        data.szInfo[..text.len()].copy_from_slice(&text);
+        unsafe {
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+        }
+    }
+}
+
 /// Re-reads the port and repaints the icon. Called when the menu opens and
 /// after every action, so nothing ticks in the background.
 fn refresh_state(hwnd: HWND) {
@@ -473,7 +724,12 @@ fn refresh_state(hwnd: HWND) {
     }
     let config = app::config();
     let previous = with_tray(|tray| tray.state, State::Unknown);
-    let running = service::is_running(config.port);
+    let running = service::is_running_with(config.port, PROBE_BUDGET);
+    if running {
+        watch_current();
+    } else {
+        app::set_service_pid(0);
+    }
     let state = if running {
         State::Running
     } else {
@@ -596,6 +852,7 @@ fn open_ui(hwnd: HWND) {
 }
 
 fn show_menu(hwnd: HWND) {
+    adopt_if_back(hwnd);
     refresh_state(hwnd);
     let menu = with_tray(|tray| tray.menu, HMENU::default());
     if menu.is_invalid() {
@@ -683,6 +940,35 @@ unsafe extern "system" fn window_proc(
             }
             WM_DONE => {
                 drain_results(hwnd);
+                LRESULT(0)
+            }
+            WM_SERVICE_EXIT => {
+                let pid = wparam.0 as u32;
+                if pid != 0 && pid == app::service_pid() {
+                    app::set_service_pid(0);
+                    diag::write(&format!("service process {pid} exited"));
+                    // While an action runs, drain_results settles the state.
+                    if !app::busy() {
+                        begin_settle(hwnd, pid);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_WATCHDOG => {
+                watchdog_beat(hwnd);
+                LRESULT(0)
+            }
+            WM_SETTLE => {
+                // A watched process is gone and nothing has taken the port back
+                // for a few seconds: say so instead of waiting for a click.
+                if !app::busy() && app::service_pid() == 0 {
+                    adopt_if_back(hwnd);
+                    if app::service_pid() == 0 {
+                        let gone = wparam.0 as u32;
+                        diag::write(&format!("service process {gone} did not come back"));
+                        announce_stopped(hwnd, Some(gone));
+                    }
+                }
                 LRESULT(0)
             }
             WM_CLOSE => {
